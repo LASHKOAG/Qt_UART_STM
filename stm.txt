@@ -1,0 +1,244 @@
+#include "mbed.h"
+
+//tcp_packet
+
+typedef struct 
+{
+	uint32_t command;
+	uint32_t length;
+	int8_t* buff;
+}tcp_packet_t;
+
+typedef struct
+{
+    uint32_t hz;
+    float current_mA;
+    float power_W;
+    float bus_voltage_V;
+    float shunt_voltage_V;
+    int16_t current_reg;
+    uint16_t config;
+    uint16_t calib;
+    uint16_t die_id;
+    uint8_t addr;
+    uint8_t rsrvd_byte;
+}INA230;
+
+#define TCP_EC_SUCCESS                  0
+#define TCP_EC_UNSUCCESS               -1
+
+#define CMD_ANSWER						1
+#define CMD_GET_INAINFO					2
+#define CMD_SHUTDOWN					3
+
+DigitalIn       btn(USER_BUTTON);
+DigitalOut      led(LED1);
+RawSerial       pc(SERIAL_TX, SERIAL_RX,9600);
+volatile char   c = '\0'; // Initialized to the NULL character
+
+bool flag = false;
+#define FLAG_TEST (1U << 0)
+EventFlags event_flags;
+char MSV[100]={10, };
+char MSVsend[100]={10, };
+
+const uint8_t sizeBuffer = 100;
+int8_t Buffer[sizeBuffer];
+
+const uint8_t sizeTempMSV = 200;
+int8_t TempMSV[sizeTempMSV];
+//char MSV[10]=" ";
+//int counters = 0;
+char TempBufferSend[50]={0, };
+int8_t counters = 0;
+bool interrupted = false;
+// void onCharReceived()
+// {
+//     c = pc.getc();
+// }
+
+//void onCharReceived()
+//{
+//    event_flags.set(FLAG_TEST);
+////    pc.putc(pc.getc()+1);
+//    c = pc.getc();
+////        MSV[0] = c;
+////    while(pc.readable ()){
+////          MSV[counters++] = pc.getc();  
+////    }
+//    MSV[counters++] = c;
+////        MSV = c;
+////    pc.putc(c);
+////    flag=true;
+////counters=0;
+//}
+
+void rx_interrupt() {
+    char ch;
+    if(pc.readable()){  //Determine if there is a character available to read
+        ch = pc.getc(); //Read char from terminal
+            //int charIndex = (ch - '0') - 49;  //Conversion from char to int where letter 'a' is 0;
+        MSV[counters++] = ch;
+    }
+    event_flags.set(FLAG_TEST);
+    return;
+}
+
+int8_t send_message (tcp_packet_t* ans_struct, RawSerial* _pc){
+	int32_t len_send=sizeof(ans_struct->command)+sizeof(ans_struct->length) + ans_struct->length;
+    // pc.putc(len_send);  //для отладки
+	memset(&TempMSV[0], 0xFF, 200);
+    uint8_t pos=0;
+		memcpy(&TempMSV[pos], &ans_struct->command, sizeof(ans_struct->command));
+			pos+=sizeof(ans_struct->command);
+		memcpy(&TempMSV[pos], &ans_struct->length, sizeof(ans_struct->length));
+			pos+=sizeof(ans_struct->length);
+		memcpy(&TempMSV[pos], &ans_struct->buff[0], ans_struct->length);
+    
+    for(uint8_t i=0; i <len_send; ++i){     //send message
+        _pc->putc(TempMSV[i]);
+    }
+	return 0;
+}
+
+    //заслать ответ
+    // res = TCP_EC_SUCCESS;
+    // tcp_packet_t ans;
+    // memset(&ans, 0x00, sizeof(tcp_packet_t));
+    // ans.command = CMD_ANSWER;
+    // ans.length = sizeof(ans.command)+sizeof(res);
+    // ans.buff = new char[sizeof(packet.command)+sizeof(res)];
+    // memcpy(&ans.buff[0], (char*)&packet.command, sizeof(packet.command));
+    // memcpy(&ans.buff[sizeof(packet.command)], (char*)&res, sizeof(res));
+                
+    // send_tcp_packet_t(&ans, p_port);
+    // delete[] ans.buff;
+
+
+    
+
+int main()
+{
+    for(int8_t i=0; i<6; ++i){
+        led = !led;
+        wait(0.2); 
+    }
+    pc.format(8, SerialBase::None, 1);
+        // pc.attach(callback(rx_interrupt), Serial::RxIrq);
+    pc.attach(&rx_interrupt, Serial::RxIrq);
+    // pc.attach(&onCharReceived);
+    INA230 ina;
+    memset(&ina, 0xFF, sizeof(INA230));
+//================================================================================
+ina.hz = 10;                    //для отладки
+ina.current_mA = 10.7;          //для отладки
+ina.power_W = 11.8;             
+ina.bus_voltage_V = 12.9;
+ina.shunt_voltage_V = 13.10;
+ina.current_reg = 14;
+ina.config = 15;
+ina.calib = 16;
+ina.die_id = 17;
+ina.addr = 18;
+
+//     memcpy(&TempBufferSend[0], &ina.hz, sizeof(ina.hz));
+// pc.putc('b');
+//     for(int i=0; i <sizeof(ina.hz); ++i){
+//         pc.putc(TempBufferSend[i]);
+//     }
+//==============================================================================
+    while (true)
+    {
+        event_flags.wait_all(FLAG_TEST);
+        event_flags.clear(FLAG_TEST);
+        ThisThread::sleep_for(10);              //необходим таймаут
+
+    // ina.current_mA = 10.0;
+    // memcpy(&TempBufferSend[0], &ina.current_mA, sizeof(ina.current_mA));
+    // pc.putc('b');
+    // for(int8_t i=0; i <sizeof(ina.current_mA); ++i){
+    //     pc.putc(TempBufferSend[i]);
+    // }
+    // memset(&TempBufferSend[0], 0xFF, 50 );
+    //----------------------------------------------------------------
+        //заслать ответ
+    uint32_t res = TCP_EC_SUCCESS;
+    tcp_packet_t ans;
+    uint8_t pos = 0;
+    uint32_t packet_command = 2; 
+    memset(&ans, 0x00, sizeof(tcp_packet_t));
+    memset(&Buffer[0], 0xFF, sizeBuffer );
+    ans.command = CMD_ANSWER;
+    ans.length = sizeof(ans.command)+sizeof(res)
+                +sizeof(ina.hz)+sizeof(ina.current_mA)
+                +sizeof(ina.power_W)+sizeof(ina.bus_voltage_V)+sizeof(ina.shunt_voltage_V)
+                +sizeof(ina.current_reg)+sizeof(ina.config)+sizeof(ina.calib)
+                +sizeof(ina.die_id)+sizeof(ina.addr);  //+всё в пакете
+    // ans.length = sizeof(uint32_t)+sizeof(uint8_t)                        //sizeof(ans.command)+sizeof(res)
+    //             +sizeof(uint32_t)+sizeof(float)                         //sizeof(ina.hz)+sizeof(ina.current_mA)
+    //             +sizeof(float)+sizeof(float)+sizeof(float)              //sizeof(ina.power_W)+sizeof(ina.bus_voltage_V)+sizeof(ina.shunt_voltage_V)
+    //             +sizeof(int16_t)+sizeof(uint16_t)+sizeof(uint16_t)      //sizeof(ina.current_reg)+sizeof(ina.config)+sizeof(ina.calib)
+    //             +sizeof(uint16_t)+sizeof(uint8_t);  //+всё в пакете     //sizeof(ina.die_id)+sizeof(ina.addr);
+    // ans.length = sizeof(ans.command)+sizeof(res) + sizeof(INA230);  //+всё в пакете 
+
+    // pc.putc(ans.length);  //для отладки
+    // memcpy(&Buffer[pos], (char*)&packet.command, sizeof(packet.command));
+    memcpy(&Buffer[pos], (char*)&packet_command, sizeof(packet_command));
+        // pos+= sizeof(packet.command);
+        pos+= sizeof(packet_command);
+    memcpy(&Buffer[pos], (char*)&res, sizeof(res));
+        pos+=sizeof(res);
+            //+всё в пакете
+    memcpy(&Buffer[pos], (char*)&ina.hz, sizeof(ina.hz));
+        pos+=sizeof(ina.hz);
+    memcpy(&Buffer[pos], (char*)&ina.current_mA, sizeof(ina.current_mA));
+        pos+=sizeof(ina.current_mA);
+    memcpy(&Buffer[pos], (char*)&ina.power_W, sizeof(ina.power_W));
+        pos+=sizeof(ina.power_W);
+    memcpy(&Buffer[pos], (char*)&ina.bus_voltage_V, sizeof(ina.bus_voltage_V));
+        pos+=sizeof(ina.bus_voltage_V);
+    memcpy(&Buffer[pos], (char*)&ina.shunt_voltage_V, sizeof(ina.shunt_voltage_V));
+        pos+=sizeof(ina.shunt_voltage_V);
+    memcpy(&Buffer[pos], (char*)&ina.current_reg, sizeof(ina.current_reg));
+        pos+=sizeof(ina.current_reg);
+    memcpy(&Buffer[pos], (char*)&ina.config, sizeof(ina.config));
+        pos+=sizeof(ina.config);
+    memcpy(&Buffer[pos], (char*)&ina.calib, sizeof(ina.calib));
+        pos+=sizeof(ina.calib);
+    memcpy(&Buffer[pos], (char*)&ina.die_id, sizeof(ina.die_id));
+        pos+=sizeof(ina.die_id);
+    memcpy(&Buffer[pos], (char*)&ina.addr, sizeof(ina.addr));
+        pos+=sizeof(ina.addr);
+
+    pos=0;
+    ans.buff = &Buffer[0];
+    send_message(&ans, &pc);
+
+    memset(&Buffer[0], 0xFF, sizeBuffer);
+    //--------------------------------------------------------------------
+
+        // for(int i=0; i <counters; ++i){      //для отладки, отправляем всё что приняли
+        //     pc.putc(MSV[i]);
+        // }
+
+        if(MSV[1]==0x20){
+            led=1;
+        }
+
+        if(MSV[0]==0x41){
+            led=0;
+        }
+
+        memset(&MSV[0], 0xFF, 100 );
+        counters=0;
+        //-----------------------------------------------------------------
+
+        if (btn == 0){
+            pc.putc('b');
+        }
+        event_flags.clear(FLAG_TEST);
+    }
+}
+
+//RawSerial use  pc.putc('b')
+//Serial use pc.printf("b")
